@@ -4,14 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"sef/app/entities"
 	"sef/internal/validation"
 	"sef/pkg/providers"
 	"sef/pkg/toolrunners"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v3/log"
 	"gorm.io/gorm"
@@ -42,7 +39,6 @@ type MessagingServiceInterface interface {
 	ExecuteToolCall(ctx context.Context, toolCall providers.ToolCall) (string, error)
 }
 
-// ValidateAndParseSessionID validates and parses session ID from string
 func (s *MessagingService) ValidateAndParseSessionID(sessionIDStr string) (uint, error) {
 	sessionID, err := strconv.ParseUint(sessionIDStr, 10, 32)
 	if err != nil {
@@ -51,7 +47,6 @@ func (s *MessagingService) ValidateAndParseSessionID(sessionIDStr string) (uint,
 	return uint(sessionID), nil
 }
 
-// GetSessionByIDAndUser retrieves a session by ID and user ID
 func (s *MessagingService) GetSessionByIDAndUser(sessionID, userID uint) (*entities.Session, error) {
 	var session entities.Session
 	if err := s.DB.
@@ -66,7 +61,6 @@ func (s *MessagingService) GetSessionByIDAndUser(sessionID, userID uint) (*entit
 	return &session, nil
 }
 
-// ParseSendMessageRequest parses and validates the send message request from body bytes
 func (s *MessagingService) ParseSendMessageRequest(body []byte) (*SendMessageRequest, error) {
 	var req SendMessageRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -80,7 +74,6 @@ func (s *MessagingService) ParseSendMessageRequest(body []byte) (*SendMessageReq
 	return &req, nil
 }
 
-// LoadSessionWithChatbotAndMessages loads session with chatbot and messages
 func (s *MessagingService) LoadSessionWithChatbotAndMessages(sessionID, userID uint) (*entities.Session, error) {
 	var session entities.Session
 	if err := s.DB.
@@ -98,7 +91,6 @@ func (s *MessagingService) LoadSessionWithChatbotAndMessages(sessionID, userID u
 	return &session, nil
 }
 
-// LoadSessionWithChatbotToolsAndMessages loads session with chatbot, tools, and messages
 func (s *MessagingService) LoadSessionWithChatbotToolsAndMessages(sessionID, userID uint) (*entities.Session, error) {
 	var session entities.Session
 	if err := s.DB.
@@ -117,11 +109,9 @@ func (s *MessagingService) LoadSessionWithChatbotToolsAndMessages(sessionID, use
 	return &session, nil
 }
 
-// ConvertToolsToDefinitions converts entity tools to provider tool definitions
 func (s *MessagingService) ConvertToolsToDefinitions(tools []entities.Tool) []providers.ToolDefinition {
 	var definitions []providers.ToolDefinition
 	for _, tool := range tools {
-		// Convert JSONB parameters to OpenAPI JSON Schema format
 		parameters := map[string]interface{}{
 			"type":       "object",
 			"properties": make(map[string]interface{}),
@@ -132,7 +122,6 @@ func (s *MessagingService) ConvertToolsToDefinitions(tools []entities.Tool) []pr
 			properties := make(map[string]interface{})
 			var required []string
 
-			// Process each parameter in the array
 			for _, param := range tool.Parameters {
 				if paramMap, ok := param.(map[string]interface{}); ok {
 					name, hasName := paramMap["name"].(string)
@@ -141,7 +130,6 @@ func (s *MessagingService) ConvertToolsToDefinitions(tools []entities.Tool) []pr
 					isRequired, hasRequired := paramMap["required"].(bool)
 
 					if hasName && hasType {
-						// Create property definition
 						property := map[string]interface{}{
 							"type": paramType,
 						}
@@ -150,7 +138,6 @@ func (s *MessagingService) ConvertToolsToDefinitions(tools []entities.Tool) []pr
 						}
 						properties[name] = property
 
-						// Add to required array if marked as required
 						if hasRequired && isRequired {
 							required = append(required, name)
 						}
@@ -175,34 +162,27 @@ func (s *MessagingService) ConvertToolsToDefinitions(tools []entities.Tool) []pr
 	return definitions
 }
 
-// ExecuteToolCall executes a tool call and returns the result
 func (s *MessagingService) ExecuteToolCall(ctx context.Context, toolCall providers.ToolCall) (string, error) {
-	// Find the tool by name (this would need to be optimized in production)
 	var tool entities.Tool
 	if err := s.DB.Where("name = ?", toolCall.Function.Name).First(&tool).Error; err != nil {
 		return "", fmt.Errorf("tool not found: %s", toolCall.Function.Name)
 	}
 
-	// Handle arguments - they might be raw JSON string or parsed map
 	var args map[string]interface{}
 	if rawArgs, ok := toolCall.Function.Arguments["raw"].(string); ok {
-		// Parse the raw JSON string
 		if err := json.Unmarshal([]byte(rawArgs), &args); err != nil {
 			return "", fmt.Errorf("failed to parse tool arguments: %w", err)
 		}
 	} else {
-		// Already parsed
 		args = toolCall.Function.Arguments
 	}
 
-	// Create tool runner
 	factory := &toolrunners.ToolRunnerFactory{}
 	runner, err := factory.NewToolRunner(tool.Type, tool.Config, tool.Parameters)
 	if err != nil {
 		return "", fmt.Errorf("failed to create tool runner: %w", err)
 	}
 
-	// Create tool call context
 	toolContext := &toolrunners.ToolCallContext{
 		ToolCallID:   toolCall.ID,
 		FunctionName: toolCall.Function.Name,
@@ -214,13 +194,11 @@ func (s *MessagingService) ExecuteToolCall(ctx context.Context, toolCall provide
 		},
 	}
 
-	// Execute tool with context
 	result, err := runner.ExecuteWithContext(ctx, args, toolContext)
 	if err != nil {
 		return "", fmt.Errorf("tool execution failed: %w", err)
 	}
 
-	// Convert result to string
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal tool result: %w", err)
@@ -229,7 +207,6 @@ func (s *MessagingService) ExecuteToolCall(ctx context.Context, toolCall provide
 	return string(resultJSON), nil
 }
 
-// SaveUserMessage saves the user message to database
 func (s *MessagingService) SaveUserMessage(sessionID uint, content string) error {
 	userMessage := entities.Message{
 		SessionID: sessionID,
@@ -245,28 +222,9 @@ func (s *MessagingService) SaveUserMessage(sessionID uint, content string) error
 	return nil
 }
 
-// cleanAssistantContent removes internal tags from assistant content before saving
-func cleanAssistantContent(content string) string {
-	// Remove <think> tags and content
-	re := regexp.MustCompile(`<think>.*?</think>`)
-	content = re.ReplaceAllString(content, "")
-
-	// Remove <tool_executing> tags and content
-	re = regexp.MustCompile(`<tool_executing>.*?</tool_executing>`)
-	content = re.ReplaceAllString(content, "")
-
-	// Remove <tool_executed> tags and content
-	re = regexp.MustCompile(`<tool_executed>.*?</tool_executed>`)
-	content = re.ReplaceAllString(content, "")
-
-	return content
-}
-
-// PrepareChatMessages prepares the messages array for the chat API
 func (s *MessagingService) PrepareChatMessages(session *entities.Session, userContent string) []providers.ChatMessage {
 	var messages []providers.ChatMessage
 
-	// Add system message if system prompt exists
 	if session.Chatbot.SystemPrompt != "" {
 		messages = append(messages, providers.ChatMessage{
 			Role:    "system",
@@ -274,7 +232,6 @@ func (s *MessagingService) PrepareChatMessages(session *entities.Session, userCo
 		})
 	}
 
-	// Add current chat session messages
 	for _, msg := range session.Messages {
 		messages = append(messages, providers.ChatMessage{
 			Role:    msg.Role,
@@ -282,7 +239,6 @@ func (s *MessagingService) PrepareChatMessages(session *entities.Session, userCo
 		})
 	}
 
-	// Add current user message
 	messages = append(messages, providers.ChatMessage{
 		Role:    "user",
 		Content: userContent,
@@ -291,7 +247,6 @@ func (s *MessagingService) PrepareChatMessages(session *entities.Session, userCo
 	return messages
 }
 
-// CreateAssistantMessage creates an empty assistant message record
 func (s *MessagingService) CreateAssistantMessage(sessionID uint) (*entities.Message, error) {
 	assistantMessage := entities.Message{
 		SessionID: sessionID,
@@ -307,7 +262,6 @@ func (s *MessagingService) CreateAssistantMessage(sessionID uint) (*entities.Mes
 	return &assistantMessage, nil
 }
 
-// CreateToolMessage creates a tool message record
 func (s *MessagingService) CreateToolMessage(sessionID uint, content string) (*entities.Message, error) {
 	toolMessage := entities.Message{
 		SessionID: sessionID,
@@ -323,296 +277,6 @@ func (s *MessagingService) CreateToolMessage(sessionID uint, content string) (*e
 	return &toolMessage, nil
 }
 
-// processToolCalls handles the execution of tool calls and returns updated messages
-// Returns: updated messages, shouldStop flag, stop reason
-func (s *MessagingService) processToolCalls(session *entities.Session, toolCalls []providers.ToolCall, messages []providers.ChatMessage, outputCh chan<- string, assistantContent *strings.Builder, toolCallCounter map[string]int) ([]providers.ChatMessage, bool, string) {
-	for _, toolCall := range toolCalls {
-		displayName := toolCall.Function.Name
-		// Extract tool display name from session.Chatbot.Tools
-		for _, t := range session.Chatbot.Tools {
-			if t.Name == toolCall.Function.Name {
-				displayName = t.DisplayName
-				break
-			}
-		}
-
-		// Ensure we have a valid display name, fallback to function name if empty
-		if displayName == "" {
-			if toolCall.Function.Name != "" {
-				displayName = toolCall.Function.Name
-			} else {
-				displayName = "Unknown Tool"
-			}
-		}
-
-		// Check if this tool has been called too many times
-		toolCallCounter[toolCall.Function.Name]++
-		if toolCallCounter[toolCall.Function.Name] > 2 {
-			log.Warn("Tool", toolCall.Function.Name, "has been called more than 2 times, stopping execution")
-			errorMsg := fmt.Sprintf("Özür dilerim, '%s' aracını kullanarak istediğiniz bilgiyi alamadım. Lütfen sorunuzu farklı bir şekilde sorun veya daha spesifik bilgi verin.", displayName)
-			outputCh <- errorMsg
-			assistantContent.WriteString(errorMsg)
-			return messages, true, "tool_call_limit_exceeded"
-		}
-
-		log.Info("Calling tool", toolCall.Function.Name, "- attempt", toolCallCounter[toolCall.Function.Name], "of 2")
-
-		// Send tool executing indicator
-		executingStr := fmt.Sprintf("<tool_executing>%s</tool_executing>", displayName)
-		outputCh <- executingStr
-		assistantContent.WriteString(executingStr)
-
-		toolResult, err := s.ExecuteToolCall(context.Background(), toolCall)
-		if err != nil {
-			log.Error("Tool execution failed:", err)
-			// Provide more user-friendly tool error messages
-			if strings.Contains(err.Error(), "not found") {
-				toolResult = fmt.Sprintf("The tool '%s' is not available or has been removed.", displayName)
-			} else if strings.Contains(err.Error(), "timeout") {
-				toolResult = fmt.Sprintf("The tool '%s' took too long to respond. Please try again.", displayName)
-			} else if strings.Contains(err.Error(), "arguments") {
-				toolResult = fmt.Sprintf("There was an issue with the parameters provided to '%s'. Please try rephrasing your request.", displayName)
-			} else {
-				toolResult = fmt.Sprintf("Tool '%s' encountered an error: %v", displayName, err)
-			}
-		}
-
-		// Send tool executed indicator
-		executedStr := fmt.Sprintf("<tool_executed>%s</tool_executed>", displayName)
-		outputCh <- executedStr
-		assistantContent.WriteString(executedStr)
-
-		// Save tool message
-		_, err = s.CreateToolMessage(session.ID, toolResult)
-		if err != nil {
-			log.Error("Failed to save tool message:", err)
-		}
-
-		// Add to messages for followup
-		toolMessage := providers.ChatMessage{
-			Role:    "tool",
-			Content: toolResult,
-		}
-		messages = append(messages, toolMessage)
-	}
-	return messages, false, ""
-}
-
-// GenerateChatResponse generates the chat response stream with infinite tool call chain support
-func (s *MessagingService) GenerateChatResponse(session *entities.Session, messages []providers.ChatMessage) (<-chan string, *entities.Message, error) {
-	// Create provider instance
-	factory := &providers.ProviderFactory{}
-	providerConfig := map[string]interface{}{
-		"base_url": session.Chatbot.Provider.BaseURL,
-	}
-
-	// Validate provider configuration
-	if session.Chatbot.Provider.Type == "" {
-		log.Error("Provider type is empty for chatbot:", session.Chatbot.Name)
-		return nil, nil, fmt.Errorf("provider type is not configured for chatbot: %s", session.Chatbot.Name)
-	}
-
-	if session.Chatbot.Provider.BaseURL == "" {
-		log.Error("Provider base URL is empty for chatbot:", session.Chatbot.Name)
-		return nil, nil, fmt.Errorf("provider base URL is not configured for chatbot: %s", session.Chatbot.Name)
-	}
-
-	log.Info("Creating provider with config:", map[string]interface{}{
-		"type":         session.Chatbot.Provider.Type,
-		"base_url":     session.Chatbot.Provider.BaseURL,
-		"chatbot_id":   session.Chatbot.ID,
-		"chatbot_name": session.Chatbot.Name,
-	})
-
-	provider, err := factory.NewProvider(session.Chatbot.Provider.Type, providerConfig)
-	if err != nil {
-		log.Error("Failed to create provider:", err, "Provider type:", session.Chatbot.Provider.Type, "Config:", providerConfig)
-		return nil, nil, fmt.Errorf("failed to initialize provider: %w", err)
-	}
-
-	log.Info("Provider created successfully for chatbot:", session.Chatbot.Name)
-
-	// Prepare options
-	options := make(map[string]interface{})
-	if session.Chatbot.ModelName != "" {
-		options["model"] = session.Chatbot.ModelName
-		log.Info("Using model from chatbot:", session.Chatbot.ModelName, "for chatbot:", session.Chatbot.Name)
-	} else {
-		log.Info("Using default model for chatbot:", session.Chatbot.Name)
-	}
-
-	// Add additional logging for debugging
-	log.Info("Chat generation parameters:", map[string]interface{}{
-		"session_id":     session.ID,
-		"chatbot_id":     session.Chatbot.ID,
-		"chatbot_name":   session.Chatbot.Name,
-		"provider_type":  session.Chatbot.Provider.Type,
-		"model_name":     session.Chatbot.ModelName,
-		"tools_count":    len(session.Chatbot.Tools),
-		"messages_count": len(messages),
-	})
-
-	// Convert tools to definitions
-	toolDefinitions := s.ConvertToolsToDefinitions(session.Chatbot.Tools)
-
-	// Create output channel
-	outputCh := make(chan string)
-
-	// Create first assistant message synchronously
-	firstAssistant, err := s.CreateAssistantMessage(session.ID)
-	if err != nil {
-		log.Error("Failed to create assistant message:", err)
-		return nil, nil, fmt.Errorf("failed to create assistant message: %w", err)
-	}
-
-	go func() {
-		defer close(outputCh)
-
-		var assistantContent strings.Builder
-		thinkingStarted := false
-		currentMessages := messages
-
-		// Keep-alive ticker to prevent timeouts
-		keepAliveTicker := time.NewTicker(30 * time.Second)
-		defer keepAliveTicker.Stop()
-
-		// Maximum iterations to prevent infinite loops
-		const maxIterations = 10
-		iteration := 0
-
-		// Track tool call counts - each tool can be called at most 2 times
-		toolCallCounter := make(map[string]int)
-
-		// Continuous loop to handle infinite tool call chains
-		for {
-			iteration++
-			if iteration > maxIterations {
-				log.Warn("Maximum tool call iterations reached for session:", session.ID)
-				errorMsg := "Özür dilerim, çok fazla araç çağrısı yapıldı. Lütfen sorunuzu daha basit bir şekilde sorun."
-				outputCh <- errorMsg
-				assistantContent.WriteString(errorMsg)
-				s.UpdateAssistantMessage(firstAssistant, assistantContent.String())
-				return
-			}
-
-			log.Info("Tool call iteration", iteration, "of", maxIterations, "for session:", session.ID)
-
-			// Generate chat response
-			log.Info("Calling GenerateChatWithTools for session:", session.ID, "with", len(currentMessages), "messages")
-			chatStream, err := provider.GenerateChatWithTools(context.Background(), currentMessages, toolDefinitions, options)
-			if err != nil {
-				log.Error("Failed to generate response:", err)
-				// Kullanıcı dostu hata mesajı gönder
-				errorMsg := "Özür dilerim, şu anda yanıt oluşturmakta zorlanıyorum. "
-				if strings.Contains(err.Error(), "connection") || strings.Contains(err.Error(), "timeout") {
-					errorMsg += "AI servisi ile bağlantı sorunu yaşanıyor gibi görünüyor. Lütfen bir süre sonra tekrar deneyin."
-				} else if strings.Contains(err.Error(), "authentication") || strings.Contains(err.Error(), "auth") {
-					errorMsg += "AI servisi ile kimlik doğrulama sorunu yaşanıyor. Lütfen bir yönetici ile iletişime geçin."
-				} else if strings.Contains(err.Error(), "model") || strings.Contains(err.Error(), "does not support") {
-					errorMsg += "Seçilen AI modeli kullanılamıyor veya araçları desteklemiyor. Lütfen farklı bir chatbot deneyin veya bir yönetici ile iletişime geçin."
-				} else {
-					errorMsg += fmt.Sprintf("Hata detayları: %v", err)
-				}
-
-				log.Info("Sending error message to client:", errorMsg)
-				outputCh <- errorMsg
-
-				// Assistant mesajını hata içeriği ile güncelle
-				s.UpdateAssistantMessage(firstAssistant, errorMsg)
-				return
-			}
-
-			log.Info("GenerateChatWithTools call successful, processing stream...")
-
-			hasToolCalls := false
-			var pendingToolCalls []providers.ToolCall
-
-			// Process the stream
-			responseCount := 0
-			for response := range chatStream {
-				responseCount++
-
-				// Handle thinking tokens
-				if response.Thinking != "" {
-					if !thinkingStarted {
-						outputCh <- "<think>"
-						thinkingStarted = true
-					}
-					outputCh <- response.Thinking
-					assistantContent.WriteString("<think>" + response.Thinking)
-				} else if thinkingStarted {
-					outputCh <- "</think>"
-					thinkingStarted = false
-					assistantContent.WriteString("</think>")
-				}
-
-				// Handle content
-				if response.Content != "" {
-					outputCh <- response.Content
-					assistantContent.WriteString(response.Content)
-				}
-
-				// Collect tool calls
-				if len(response.ToolCalls) > 0 {
-					log.Info("Agent tool calls: ", response.ToolCalls)
-					hasToolCalls = true
-					pendingToolCalls = append(pendingToolCalls, response.ToolCalls...)
-				}
-
-				// If response is done, process any collected tool calls
-				if response.Done {
-					log.Info("Response marked as done after", responseCount, "responses")
-					if thinkingStarted {
-						outputCh <- "</think>"
-						thinkingStarted = false
-						assistantContent.WriteString("</think>")
-					}
-					break
-				}
-			}
-
-			log.Info("Stream processing finished. Total responses:", responseCount, "HasToolCalls:", hasToolCalls)
-
-			// If no tool calls were made, we're done
-			if !hasToolCalls {
-				// Update the assistant message with full content
-				s.UpdateAssistantMessage(firstAssistant, assistantContent.String())
-				return
-			}
-
-			// Close thinking if open before processing tools
-			if thinkingStarted {
-				outputCh <- "</think>"
-				thinkingStarted = false
-				assistantContent.WriteString("</think>")
-			}
-
-			// IMPORTANT: Add the assistant's response to the message history
-			// This helps the LLM understand what it has already said and prevents re-calling tools
-			assistantMessage := providers.ChatMessage{
-				Role:    "assistant",
-				Content: cleanAssistantContent(assistantContent.String()),
-			}
-			currentMessages = append(currentMessages, assistantMessage)
-
-			// Process tool calls and update messages for next iteration
-			var shouldStop bool
-			var stopReason string
-			currentMessages, shouldStop, stopReason = s.processToolCalls(session, pendingToolCalls, currentMessages, outputCh, &assistantContent, toolCallCounter)
-
-			// If we should stop (e.g., tool call limit exceeded), save message and exit
-			if shouldStop {
-				log.Info("Stopping tool execution loop. Reason:", stopReason)
-				s.UpdateAssistantMessage(firstAssistant, assistantContent.String())
-				return
-			}
-		}
-	}()
-
-	return outputCh, firstAssistant, nil
-}
-
-// UpdateAssistantMessage updates the assistant message with the full response
 func (s *MessagingService) UpdateAssistantMessage(assistantMessage *entities.Message, content string) {
 	if assistantMessage == nil {
 		log.Error("Attempted to update nil assistant message")
@@ -624,10 +288,22 @@ func (s *MessagingService) UpdateAssistantMessage(assistantMessage *entities.Mes
 	}
 }
 
-// UpdateAssistantMessageWithCallback updates the assistant message and executes a callback
 func (s *MessagingService) UpdateAssistantMessageWithCallback(assistantMessage *entities.Message, content string, callback func()) {
 	s.UpdateAssistantMessage(assistantMessage, content)
 	if callback != nil {
 		callback()
+	}
+}
+
+// GenerateChatResponse - MAIN ROUTER
+func (s *MessagingService) GenerateChatResponse(session *entities.Session, messages []providers.ChatMessage) (<-chan string, *entities.Message, error) {
+	isGemma := isGemmaModel(session.Chatbot.ModelName)
+
+	if isGemma {
+		log.Info("🔍 Using Gemma response generation for:", session.Chatbot.ModelName)
+		return s.generateChatResponseGemma(session, messages)
+	} else {
+		log.Info("🔍 Using OpenAI response generation for:", session.Chatbot.ModelName)
+		return s.generateChatResponseOpenAI(session, messages)
 	}
 }
