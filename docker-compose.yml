@@ -85,7 +85,7 @@ services:
       - KEYCLOAK_URL=http://keycloak:8080
       - KEYCLOAK_REALM=sef-realm
       - KEYCLOAK_CLIENT_ID=sef-client
-      - KEYCLOAK_CLIENT_SECRET=lOvSVn2N6pLWGu5rmPI5ZxRtzKOyH58d
+      - KEYCLOAK_CLIENT_SECRET=<your-keycloak-client-secret>
       - KEYCLOAK_REDIRECT_URL=http://localhost:3000/auth/callback
     ports:
       - "8110:8110"
