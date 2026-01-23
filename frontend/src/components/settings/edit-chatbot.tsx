@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { http } from "@/services"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { Edit2 } from "lucide-react"
+import { Edit2, ChevronDown, ChevronUp } from "lucide-react"
 import { useForm } from "react-hook-form"
 import { useTranslation } from "react-i18next"
 import { z } from "zod"
@@ -25,6 +25,7 @@ import { Textarea } from "../ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select"
 import { Checkbox } from "../ui/checkbox"
 import { Switch } from "../ui/switch"
+import { Slider } from "../ui/slider"
 import { useToast } from "../ui/use-toast"
 import { IChatbot } from "@/types/chatbot"
 import { IProvider } from "@/types/provider"
@@ -40,38 +41,31 @@ export default function EditChatbot() {
   const [models, setModels] = useState<string[]>([])
   const [tools, setTools] = useState<ITool[]>([])
   const [documents, setDocuments] = useState<IDocument[]>([])
-  const [selectedProviderId, setSelectedProviderId] = useState<number | null>(null)
-  const [selectedTools, setSelectedTools] = useState<number[]>([])
-  const [selectedDocuments, setSelectedDocuments] = useState<number[]>([])
-  const [promptSuggestions, setPromptSuggestions] = useState<string[]>([])
+  const [showAdvanced, setShowAdvanced] = useState(false)
   const [newSuggestion, setNewSuggestion] = useState("")
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false)
-  const [toolFormat, setToolFormat] = useState("json")
-  const [outputFormat, setOutputFormat] = useState("json")
 
-  const formSchema = z
-    .object({
-      id: z.number().positive(),
-      name: z
-        .string()
-        .min(2, {
-          message: t("chatbots.validation.name_min"),
-        })
-        .max(255, {
-          message: t("chatbots.validation.name_max"),
-        }),
-      description: z
-        .string()
-        .max(1000, {
-          message: t("chatbots.validation.description_max"),
-        })
-        .optional(),
-      provider_id: z.number().min(1, t("chatbots.validation.provider_required")),
-      model_name: z.string().min(1, t("chatbots.validation.model_required")),
-      system_prompt: z.string().optional(),
-    })
+  const formSchema = z.object({
+    id: z.number().positive(),
+    name: z.string().min(2, { message: t("chatbots.validation.name_min") }).max(255, { message: t("chatbots.validation.name_max") }),
+    description: z.string().max(1000, { message: t("chatbots.validation.description_max") }).optional(),
+    provider_id: z.number().min(1, t("chatbots.validation.provider_required")),
+    model_name: z.string().min(1, t("chatbots.validation.model_required")),
+    system_prompt: z.string().optional(),
+    web_search_enabled: z.boolean(),
+    tool_format: z.string(),
+    output_format: z.string(),
+    tool_ids: z.array(z.number()),
+    document_ids: z.array(z.number()),
+    prompt_suggestions: z.array(z.string()),
+    // Model Parameters
+    temperature: z.number().min(0).max(2).nullable(),
+    top_p: z.number().min(0).max(1).nullable(),
+    top_k: z.number().min(1).max(100).nullable(),
+  })
 
-  const form = useForm<z.infer<typeof formSchema>>({
+  type FormValues = z.infer<typeof formSchema>
+
+  const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       id: 0,
@@ -80,8 +74,22 @@ export default function EditChatbot() {
       provider_id: 0,
       model_name: "",
       system_prompt: "",
+      web_search_enabled: false,
+      tool_format: "json",
+      output_format: "json",
+      tool_ids: [],
+      document_ids: [],
+      prompt_suggestions: [],
+      temperature: null,
+      top_p: null,
+      top_k: null,
     },
   })
+
+  const watchProviderId = form.watch("provider_id")
+  const watchToolIds = form.watch("tool_ids")
+  const watchDocumentIds = form.watch("document_ids")
+  const watchPromptSuggestions = form.watch("prompt_suggestions")
 
   useEffect(() => {
     // Fetch providers
@@ -106,9 +114,10 @@ export default function EditChatbot() {
     })
   }, [])
 
-  const fetchModels = (providerId: number) => {
-    if (providerId) {
-      http.get(`/providers/${providerId}/models`).then((res) => {
+  // Fetch models when provider changes
+  useEffect(() => {
+    if (watchProviderId) {
+      http.get(`/providers/${watchProviderId}/models`).then((res) => {
         setModels(res.data.models || [])
       }).catch((e) => {
         console.error('Error fetching models:', e)
@@ -117,22 +126,13 @@ export default function EditChatbot() {
     } else {
       setModels([])
     }
-  }
+  }, [watchProviderId])
 
   const [open, setOpen] = useState<boolean>(false)
-  const handleEdit = (values: z.infer<typeof formSchema>) => {
-    const payload = {
-      ...values,
-      web_search_enabled: webSearchEnabled,
-      tool_format: toolFormat,
-      output_format: outputFormat,
-      tool_ids: selectedTools,
-      document_ids: selectedDocuments,
-      prompt_suggestions: promptSuggestions,
-    }
-
+  
+  const handleEdit = (values: FormValues) => {
     http
-      .patch(`/chatbots/${values.id}`, payload)
+      .patch(`/chatbots/${values.id}`, values)
       .then((res) => {
         if (res.status === 200) {
           toast({
@@ -142,9 +142,8 @@ export default function EditChatbot() {
           emitter.emit("REFETCH_CHATBOTS")
           setOpen(false)
           form.reset()
-          setSelectedTools([])
-          setSelectedDocuments([])
-          setWebSearchEnabled(false)
+          setNewSuggestion("")
+          setShowAdvanced(false)
         } else {
           toast({
             title: t("error"),
@@ -171,15 +170,11 @@ export default function EditChatbot() {
       const d = data as IChatbot & { prompt_suggestions?: string[] }
       setChatbot(d)
       setOpen(true)
-      setSelectedProviderId(d.provider_id)
-      fetchModels(d.provider_id)
-      setSelectedTools(d.tools?.map(tool => tool.id) || [])
-      setSelectedDocuments(d.documents?.map(doc => doc.id) || [])
-      setPromptSuggestions(d.prompt_suggestions || [])
       setNewSuggestion("")
-      setWebSearchEnabled(d.web_search_enabled || false)
-      setToolFormat(d.tool_format || "json")
-      setOutputFormat(d.output_format || "json")
+      // Show advanced section if any parameter is set
+      setShowAdvanced(
+        d.temperature !== null || d.top_p !== null || d.top_k !== null
+      )
       form.reset({
         id: d.id,
         name: d.name,
@@ -187,6 +182,15 @@ export default function EditChatbot() {
         provider_id: d.provider_id,
         model_name: d.model_name,
         system_prompt: d.system_prompt,
+        web_search_enabled: d.web_search_enabled || false,
+        tool_format: d.tool_format || "json",
+        output_format: d.output_format || "json",
+        tool_ids: d.tools?.map(tool => tool.id) || [],
+        document_ids: d.documents?.map(doc => doc.id) || [],
+        prompt_suggestions: d.prompt_suggestions || [],
+        temperature: d.temperature ?? null,
+        top_p: d.top_p ?? null,
+        top_k: d.top_k ?? null,
       })
     })
 
@@ -238,12 +242,7 @@ export default function EditChatbot() {
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="provider_id">{t("chatbots.create.provider")}</Label>
                   <Select
-                    onValueChange={(value) => {
-                      const providerId = parseInt(value)
-                      field.onChange(providerId)
-                      setSelectedProviderId(providerId)
-                      fetchModels(providerId)
-                    }}
+                    onValueChange={(value) => field.onChange(parseInt(value))}
                     value={field.value?.toString()}
                   >
                     <SelectTrigger>
@@ -271,10 +270,10 @@ export default function EditChatbot() {
                   <Select
                     onValueChange={field.onChange}
                     value={field.value}
-                    disabled={!selectedProviderId || models.length === 0}
+                    disabled={!watchProviderId || models.length === 0}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder={selectedProviderId ? t("chatbots.edit.model_select_placeholder") : t("chatbots.edit.model_select_provider_first")} />
+                      <SelectValue placeholder={watchProviderId ? t("chatbots.edit.model_select_placeholder") : t("chatbots.edit.model_select_provider_first")} />
                     </SelectTrigger>
                     <SelectContent>
                       {models.map((model) => (
@@ -305,59 +304,204 @@ export default function EditChatbot() {
               )}
             />
 
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="web_search">
-                    {t("chatbots.edit.web_search", "Web Search")}
+            <FormField
+              control={form.control}
+              name="web_search_enabled"
+              render={({ field }) => (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="web_search">
+                        {t("chatbots.edit.web_search", "Web Search")}
+                      </Label>
+                      <p className="text-sm text-muted-foreground">
+                        {t("chatbots.edit.web_search_description", "Enable web search capability for this chatbot")}
+                      </p>
+                    </div>
+                    <Switch
+                      id="web_search"
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                    />
+                  </div>
+                </div>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="tool_format"
+              render={({ field }) => (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="tool_format">
+                    {t("chatbots.edit.tool_format", "Tool Format")}
                   </Label>
                   <p className="text-sm text-muted-foreground">
-                    {t("chatbots.edit.web_search_description", "Enable web search capability for this chatbot")}
+                    {t("chatbots.edit.tool_format_description", "Choose the format for tool definitions. TOON format uses 30-60% fewer tokens than JSON.")}
                   </p>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger id="tool_format">
+                      <SelectValue placeholder={t("chatbots.edit.tool_format_placeholder", "Select format")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="json">JSON (Standard)</SelectItem>
+                      <SelectItem value="toon">TOON (Token-efficient)</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Switch
-                  id="web_search"
-                  checked={webSearchEnabled}
-                  onCheckedChange={setWebSearchEnabled}
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="output_format"
+              render={({ field }) => (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="output_format">
+                    {t("chatbots.edit.output_format", "Tool Output Format")}
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    {t("chatbots.edit.output_format_description", "Choose the format for tool outputs sent to the LLM. TOON format uses 30-60% fewer tokens than JSON.")}
+                  </p>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger id="output_format">
+                      <SelectValue placeholder={t("chatbots.edit.output_format_placeholder", "Select format")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="json">JSON (Standard)</SelectItem>
+                      <SelectItem value="toon">TOON (Token-efficient)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            />
+
+            {/* Advanced Model Parameters */}
+            <div className="flex flex-col gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                className="flex items-center justify-between w-full p-0 h-auto hover:bg-transparent"
+                onClick={() => setShowAdvanced(!showAdvanced)}
+              >
+                <Label className="cursor-pointer">
+                  {t("chatbots.edit.advanced_settings", "Advanced Model Parameters")}
+                </Label>
+                {showAdvanced ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+              </Button>
+              <p className="text-sm text-muted-foreground">
+                {t("chatbots.edit.advanced_settings_description", "Fine-tune the model's behavior with temperature, top-p, top-k, and other parameters")}
+              </p>
+            </div>
+
+            {showAdvanced && (
+              <div className="space-y-4 border rounded-md p-4 bg-muted/30">
+                {/* Temperature */}
+                <FormField
+                  control={form.control}
+                  name="temperature"
+                  render={({ field }) => (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="temperature">
+                          {t("chatbots.edit.temperature", "Temperature")}
+                        </Label>
+                        <span className="text-sm text-muted-foreground">
+                          {field.value !== null ? field.value.toFixed(2) : t("chatbots.edit.default", "Default")}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {t("chatbots.edit.temperature_description", "Controls randomness. Lower values make responses more focused and deterministic.")}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Slider
+                          id="temperature"
+                          min={0}
+                          max={2}
+                          step={0.01}
+                          value={[field.value ?? 0.7]}
+                          onValueChange={(v) => field.onChange(v[0])}
+                          className="flex-1"
+                        />
+                        <Button type="button" variant="ghost" size="sm" onClick={() => field.onChange(null)} className="text-xs h-6 px-2">
+                          {t("chatbots.edit.reset", "Reset")}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                />
+
+                {/* Top P */}
+                <FormField
+                  control={form.control}
+                  name="top_p"
+                  render={({ field }) => (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="top_p">
+                          {t("chatbots.edit.top_p", "Top P (Nucleus Sampling)")}
+                        </Label>
+                        <span className="text-sm text-muted-foreground">
+                          {field.value !== null ? field.value.toFixed(2) : t("chatbots.edit.default", "Default")}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {t("chatbots.edit.top_p_description", "Controls diversity via nucleus sampling. 0.9 means consider top 90% probability mass.")}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Slider
+                          id="top_p"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={[field.value ?? 0.9]}
+                          onValueChange={(v) => field.onChange(v[0])}
+                          className="flex-1"
+                        />
+                        <Button type="button" variant="ghost" size="sm" onClick={() => field.onChange(null)} className="text-xs h-6 px-2">
+                          {t("chatbots.edit.reset", "Reset")}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                />
+
+                {/* Top K */}
+                <FormField
+                  control={form.control}
+                  name="top_k"
+                  render={({ field }) => (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="top_k">
+                          {t("chatbots.edit.top_k", "Top K")}
+                        </Label>
+                        <span className="text-sm text-muted-foreground">
+                          {field.value !== null ? field.value : t("chatbots.edit.default", "Default")}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {t("chatbots.edit.top_k_description", "Limits vocabulary to top K tokens. Lower values increase focus.")}
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <Slider
+                          id="top_k"
+                          min={1}
+                          max={100}
+                          step={1}
+                          value={[field.value ?? 40]}
+                          onValueChange={(v) => field.onChange(v[0])}
+                          className="flex-1"
+                        />
+                        <Button type="button" variant="ghost" size="sm" onClick={() => field.onChange(null)} className="text-xs h-6 px-2">
+                          {t("chatbots.edit.reset", "Reset")}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 />
               </div>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="tool_format">
-                {t("chatbots.edit.tool_format", "Tool Format")}
-              </Label>
-              <p className="text-sm text-muted-foreground">
-                {t("chatbots.edit.tool_format_description", "Choose the format for tool definitions. TOON format uses 30-60% fewer tokens than JSON.")}
-              </p>
-              <Select value={toolFormat} onValueChange={setToolFormat}>
-                <SelectTrigger id="tool_format">
-                  <SelectValue placeholder={t("chatbots.edit.tool_format_placeholder", "Select format")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="json">JSON (Standard)</SelectItem>
-                  <SelectItem value="toon">TOON (Token-efficient)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="output_format">
-                {t("chatbots.edit.output_format", "Tool Output Format")}
-              </Label>
-              <p className="text-sm text-muted-foreground">
-                {t("chatbots.edit.output_format_description", "Choose the format for tool outputs sent to the LLM. TOON format uses 30-60% fewer tokens than JSON.")}
-              </p>
-              <Select value={outputFormat} onValueChange={setOutputFormat}>
-                <SelectTrigger id="output_format">
-                  <SelectValue placeholder={t("chatbots.edit.output_format_placeholder", "Select format")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="json">JSON (Standard)</SelectItem>
-                  <SelectItem value="toon">TOON (Token-efficient)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            )}
 
             <div className="flex flex-col gap-2">
               <Label>{t("chatbots.edit.prompt_suggestions", "Prompt Suggestions")}</Label>
@@ -372,8 +516,8 @@ export default function EditChatbot() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault()
-                      if (newSuggestion.trim() && promptSuggestions.length < 6) {
-                        setPromptSuggestions([...promptSuggestions, newSuggestion.trim()])
+                      if (newSuggestion.trim() && watchPromptSuggestions.length < 6) {
+                        form.setValue("prompt_suggestions", [...watchPromptSuggestions, newSuggestion.trim()])
                         setNewSuggestion("")
                       }
                     }
@@ -384,19 +528,19 @@ export default function EditChatbot() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    if (newSuggestion.trim() && promptSuggestions.length < 6) {
-                      setPromptSuggestions([...promptSuggestions, newSuggestion.trim()])
+                    if (newSuggestion.trim() && watchPromptSuggestions.length < 6) {
+                      form.setValue("prompt_suggestions", [...watchPromptSuggestions, newSuggestion.trim()])
                       setNewSuggestion("")
                     }
                   }}
-                  disabled={!newSuggestion.trim() || promptSuggestions.length >= 6}
+                  disabled={!newSuggestion.trim() || watchPromptSuggestions.length >= 6}
                 >
                   {t("chatbots.edit.add", "Add")}
                 </Button>
               </div>
-              {promptSuggestions.length > 0 && (
+              {watchPromptSuggestions.length > 0 && (
                 <div className="flex flex-wrap gap-2 mt-2">
-                  {promptSuggestions.map((suggestion, index) => (
+                  {watchPromptSuggestions.map((suggestion, index) => (
                     <div
                       key={index}
                       className="inline-flex items-center gap-2 rounded-md border bg-muted px-3 py-1.5 text-sm"
@@ -405,7 +549,7 @@ export default function EditChatbot() {
                       <button
                         type="button"
                         onClick={() => {
-                          setPromptSuggestions(promptSuggestions.filter((_, i) => i !== index))
+                          form.setValue("prompt_suggestions", watchPromptSuggestions.filter((_, i) => i !== index))
                         }}
                         className="text-muted-foreground hover:text-foreground"
                       >
@@ -415,7 +559,7 @@ export default function EditChatbot() {
                   ))}
                 </div>
               )}
-              {promptSuggestions.length >= 6 && (
+              {watchPromptSuggestions.length >= 6 && (
                 <p className="text-xs text-muted-foreground">
                   {t("chatbots.edit.max_suggestions", "Maximum 6 suggestions allowed")}
                 </p>
@@ -431,14 +575,14 @@ export default function EditChatbot() {
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      if (selectedTools.length === tools.length) {
-                        setSelectedTools([])
+                      if (watchToolIds.length === tools.length) {
+                        form.setValue("tool_ids", [])
                       } else {
-                        setSelectedTools(tools.map(tool => tool.id))
+                        form.setValue("tool_ids", tools.map(tool => tool.id))
                       }
                     }}
                   >
-                    {selectedTools.length === tools.length ? t("chatbots.edit.tools_deselect_all") : t("chatbots.edit.tools_select_all")}
+                    {watchToolIds.length === tools.length ? t("chatbots.edit.tools_deselect_all") : t("chatbots.edit.tools_select_all")}
                   </Button>
                 )}
               </div>
@@ -447,12 +591,12 @@ export default function EditChatbot() {
                   <div key={tool.id} className="flex items-center space-x-2">
                     <Checkbox
                       id={`tool-${tool.id}`}
-                      checked={selectedTools.includes(tool.id)}
+                      checked={watchToolIds.includes(tool.id)}
                       onCheckedChange={(checked) => {
                         if (checked) {
-                          setSelectedTools([...selectedTools, tool.id])
+                          form.setValue("tool_ids", [...watchToolIds, tool.id])
                         } else {
-                          setSelectedTools(selectedTools.filter(id => id !== tool.id))
+                          form.setValue("tool_ids", watchToolIds.filter(id => id !== tool.id))
                         }
                       }}
                     />
@@ -482,14 +626,14 @@ export default function EditChatbot() {
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      if (selectedDocuments.length === documents.length) {
-                        setSelectedDocuments([])
+                      if (watchDocumentIds.length === documents.length) {
+                        form.setValue("document_ids", [])
                       } else {
-                        setSelectedDocuments(documents.map(doc => doc.id))
+                        form.setValue("document_ids", documents.map(doc => doc.id))
                       }
                     }}
                   >
-                    {selectedDocuments.length === documents.length ? t("chatbots.edit.documents_deselect_all") : t("chatbots.edit.documents_select_all")}
+                    {watchDocumentIds.length === documents.length ? t("chatbots.edit.documents_deselect_all") : t("chatbots.edit.documents_select_all")}
                   </Button>
                 )}
               </div>
@@ -498,12 +642,12 @@ export default function EditChatbot() {
                   <div key={doc.id} className="flex items-center space-x-2">
                     <Checkbox
                       id={`document-${doc.id}`}
-                      checked={selectedDocuments.includes(doc.id)}
+                      checked={watchDocumentIds.includes(doc.id)}
                       onCheckedChange={(checked) => {
                         if (checked) {
-                          setSelectedDocuments([...selectedDocuments, doc.id])
+                          form.setValue("document_ids", [...watchDocumentIds, doc.id])
                         } else {
-                          setSelectedDocuments(selectedDocuments.filter(id => id !== doc.id))
+                          form.setValue("document_ids", watchDocumentIds.filter(id => id !== doc.id))
                         }
                       }}
                     />

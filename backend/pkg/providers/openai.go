@@ -45,6 +45,18 @@ func (o *OpenAIProvider) ValidateConfig(config map[string]interface{}) error {
 	return nil
 }
 
+// applyOptionsToRequest applies common options to an OpenAI ChatCompletionRequest
+func applyOptionsToRequest(req *openai.ChatCompletionRequest, options map[string]interface{}) {
+	// Temperature
+	if temp, ok := options["temperature"].(float64); ok {
+		req.Temperature = float32(temp)
+	}
+	// Top P (nucleus sampling)
+	if topP, ok := options["top_p"].(float64); ok {
+		req.TopP = float32(topP)
+	}
+}
+
 // Generate generates a response from OpenAI with streaming support
 func (o *OpenAIProvider) Generate(ctx context.Context, prompt string, options map[string]interface{}) (<-chan string, error) {
 	model := "gpt-3.5-turbo" // Default model
@@ -60,13 +72,8 @@ func (o *OpenAIProvider) Generate(ctx context.Context, prompt string, options ma
 		Stream: true,
 	}
 
-	// Handle additional options like temperature, max_tokens, etc.
-	if temp, ok := options["temperature"].(float64); ok {
-		req.Temperature = float32(temp)
-	}
-	if maxTokens, ok := options["max_tokens"].(int); ok {
-		req.MaxTokens = maxTokens
-	}
+	// Apply all model options
+	applyOptionsToRequest(&req, options)
 
 	stream, err := o.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
@@ -131,13 +138,8 @@ func (o *OpenAIProvider) GenerateChat(ctx context.Context, messages []ChatMessag
 		Stream:   true,
 	}
 
-	// Handle additional options
-	if temp, ok := options["temperature"].(float64); ok {
-		req.Temperature = float32(temp)
-	}
-	if maxTokens, ok := options["max_tokens"].(int); ok {
-		req.MaxTokens = maxTokens
-	}
+	// Apply all model options
+	applyOptionsToRequest(&req, options)
 
 	stream, err := o.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {
@@ -221,13 +223,8 @@ func (o *OpenAIProvider) GenerateChatWithTools(ctx context.Context, messages []C
 		req.Tools = openaiTools
 	}
 
-	// Handle additional options
-	if temp, ok := options["temperature"].(float64); ok {
-		req.Temperature = float32(temp)
-	}
-	if maxTokens, ok := options["max_tokens"].(int); ok {
-		req.MaxTokens = maxTokens
-	}
+	// Apply all model options
+	applyOptionsToRequest(&req, options)
 
 	stream, err := o.client.CreateChatCompletionStream(ctx, req)
 	if err != nil {

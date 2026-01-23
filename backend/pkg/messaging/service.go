@@ -9,8 +9,8 @@ import (
 	"sef/internal/validation"
 	"sef/pkg/providers"
 	"sef/pkg/rag"
-	"sef/pkg/toon"
 	"sef/pkg/toolrunners"
+	"sef/pkg/toon"
 	"strconv"
 	"strings"
 	"time"
@@ -633,6 +633,17 @@ func (s *MessagingService) GenerateChatResponse(session *entities.Session, messa
 		log.Info("Using default model for chatbot:", session.Chatbot.Name)
 	}
 
+	// Add model parameters from chatbot settings
+	if session.Chatbot.Temperature != nil {
+		options["temperature"] = *session.Chatbot.Temperature
+	}
+	if session.Chatbot.TopP != nil {
+		options["top_p"] = *session.Chatbot.TopP
+	}
+	if session.Chatbot.TopK != nil {
+		options["top_k"] = *session.Chatbot.TopK
+	}
+
 	// Add additional logging for debugging
 	log.Info("Chat generation parameters:", map[string]interface{}{
 		"session_id":     session.ID,
@@ -673,7 +684,7 @@ func (s *MessagingService) GenerateChatResponse(session *entities.Session, messa
 		for i, toolDef := range toolDefinitions {
 			log.Infof("Tool %d: %s", i+1, toolDef.Function.Name)
 			/*if toonContent, ok := toolDef.Function.Parameters["toon_content"].(string); ok {
-				log.Infof("TOON Content:\n%s", toonContent) 
+				log.Infof("TOON Content:\n%s", toonContent)
 			}*/ // Uncomment for full content logging
 		}
 		log.Info("====================================")

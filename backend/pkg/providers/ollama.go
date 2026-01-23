@@ -23,6 +23,33 @@ func NewOllamaProvider(config map[string]interface{}) *OllamaProvider {
 	}
 }
 
+// prepareOllamaOptions converts common options to Ollama-compatible format
+func prepareOllamaOptions(options map[string]interface{}) map[string]interface{} {
+	ollamaOpts := make(map[string]interface{})
+
+	// Copy model separately (not part of options in Ollama)
+	if model, ok := options["model"]; ok {
+		ollamaOpts["model"] = model
+	}
+
+	// Temperature (same name)
+	if temp, ok := options["temperature"].(float64); ok {
+		ollamaOpts["temperature"] = temp
+	}
+
+	// Top P (same name)
+	if topP, ok := options["top_p"].(float64); ok {
+		ollamaOpts["top_p"] = topP
+	}
+
+	// Top K (same name)
+	if topK, ok := options["top_k"].(int); ok {
+		ollamaOpts["top_k"] = topK
+	}
+
+	return ollamaOpts
+}
+
 // Generate generates a response from Ollama with streaming support
 func (o *OllamaProvider) Generate(ctx context.Context, prompt string, options map[string]interface{}) (<-chan string, error) {
 	model := "gpt-oss:20b" // Default model
@@ -30,11 +57,14 @@ func (o *OllamaProvider) Generate(ctx context.Context, prompt string, options ma
 		model = m
 	}
 
+	// Prepare Ollama-compatible options
+	ollamaOpts := prepareOllamaOptions(options)
+
 	req := ollama.GenerateRequest{
 		Mode:    "text",
 		Model:   model,
 		Prompt:  prompt,
-		Options: options,
+		Options: ollamaOpts,
 		Stream:  true,
 	}
 
@@ -62,11 +92,14 @@ func (o *OllamaProvider) GenerateChat(ctx context.Context, messages []ChatMessag
 		}
 	}
 
+	// Prepare Ollama-compatible options
+	ollamaOpts := prepareOllamaOptions(options)
+
 	req := ollama.GenerateRequest{
 		Mode:     "chat",
 		Model:    model,
 		Messages: ollamaMessages,
-		Options:  options,
+		Options:  ollamaOpts,
 		Stream:   true,
 	}
 
@@ -121,12 +154,15 @@ func (o *OllamaProvider) GenerateChatWithTools(ctx context.Context, messages []C
 		})
 	}
 
+	// Prepare Ollama-compatible options
+	ollamaOpts := prepareOllamaOptions(options)
+
 	req := ollama.GenerateRequest{
 		Mode:     "chat",
 		Model:    model,
 		Messages: ollamaMessages,
 		Tools:    ollamaTools,
-		Options:  options,
+		Options:  ollamaOpts,
 		Stream:   true,
 	}
 

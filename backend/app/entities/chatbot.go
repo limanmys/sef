@@ -41,9 +41,14 @@ type Chatbot struct {
 	ToolFormat        string      `json:"tool_format" gorm:"default:'json';size:10"`
 	OutputFormat      string      `json:"output_format" gorm:"default:'json';size:10"`
 	PromptSuggestions StringArray `json:"prompt_suggestions" gorm:"type:json"`
-	Sessions          []Session   `json:"sessions,omitempty" gorm:"foreignKey:ChatbotID"`
-	Tools             []Tool      `json:"tools,omitempty" gorm:"many2many:chatbot_tools;"`
-	Documents         []Document  `json:"documents,omitempty" gorm:"many2many:chatbot_documents;"`
+	// Model Parameters
+	Temperature *float64 `json:"temperature" gorm:"type:decimal(3,2)"`
+	TopP        *float64 `json:"top_p" gorm:"type:decimal(3,2)"`
+	TopK        *int     `json:"top_k"`
+	// Relationships
+	Sessions  []Session  `json:"sessions,omitempty" gorm:"foreignKey:ChatbotID"`
+	Tools     []Tool     `json:"tools,omitempty" gorm:"many2many:chatbot_tools;"`
+	Documents []Document `json:"documents,omitempty" gorm:"many2many:chatbot_documents;"`
 }
 
 // GetPromptSuggestions returns the prompt suggestions, or default ones if none are set

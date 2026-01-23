@@ -49,6 +49,10 @@ func (h *Controller) Create(c fiber.Ctx) error {
 		PromptSuggestions []string `json:"prompt_suggestions"`
 		ToolIDs           []uint   `json:"tool_ids"`
 		DocumentIDs       []uint   `json:"document_ids"`
+		// Model Parameters
+		Temperature *float64 `json:"temperature"`
+		TopP        *float64 `json:"top_p"`
+		TopK        *int     `json:"top_k"`
 	}
 	if err := c.Bind().JSON(&payload); err != nil {
 		return err
@@ -62,6 +66,10 @@ func (h *Controller) Create(c fiber.Ctx) error {
 		SystemPrompt:      payload.SystemPrompt,
 		ModelName:         payload.ModelName,
 		PromptSuggestions: payload.PromptSuggestions,
+		// Model Parameters
+		Temperature: payload.Temperature,
+		TopP:        payload.TopP,
+		TopK:        payload.TopK,
 	}
 
 	if err := h.DB.Create(chatbot).Error; err != nil {
