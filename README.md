@@ -244,7 +244,7 @@
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/sef.git
+   git clone https://github.com/limanmys/sef.git
    cd sef
    ```
 
