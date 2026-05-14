@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/gorm"
 )
+
+var validColumnName = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
 
 type Filter struct {
 	Key       string `json:"id"`
@@ -171,11 +174,15 @@ func (p *Paginator) Paginate(dataSource interface{}) (*Data, error) {
 	db := p.DB
 
 	if len(p.OrderBy) > 0 {
+		validCols := modelJSONColumns(dataSource)
 		for _, o := range p.OrderBy {
-			if o != "" {
+			if o == "" {
+				continue
+			}
+			col := strings.Fields(o)[0]
+			if validCols[col] {
 				db = db.Order(o)
 			}
-
 		}
 	}
 
@@ -303,13 +310,57 @@ func getIntKey(k string, d int, c fiber.Ctx) int {
 	return value
 }
 
-func convertOrder(order string) string {
-	if order[0] == '-' {
-		return order[1:] + " desc"
-	} else if order[0] == '+' {
-		return order[1:] + " asc"
+// modelJSONColumns returns a set of json tag names from the model's struct fields.
+// Only these names are allowed as sort columns.
+func modelJSONColumns(dataSource interface{}) map[string]bool {
+	t := reflect.TypeOf(dataSource)
+	for t.Kind() == reflect.Ptr || t.Kind() == reflect.Slice {
+		t = t.Elem()
 	}
-	return order + " asc"
+	cols := make(map[string]bool)
+	collectJSONColumns(t, cols)
+	return cols
+}
+
+func collectJSONColumns(t reflect.Type, cols map[string]bool) {
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		tag := strings.SplitN(f.Tag.Get("json"), ",", 2)[0]
+		if tag != "" && tag != "-" {
+			cols[tag] = true
+		}
+		if f.Anonymous || (f.Type.Kind() == reflect.Struct) {
+			collectJSONColumns(f.Type, cols)
+		}
+	}
+}
+
+func convertOrder(order string) string {
+	dir := " asc"
+	col := order
+
+	if len(order) == 0 {
+		return ""
+	}
+
+	if order[0] == '-' {
+		dir = " desc"
+		col = order[1:]
+	} else if order[0] == '+' {
+		col = order[1:]
+	}
+
+	if !validColumnName.MatchString(col) {
+		return ""
+	}
+
+	return col + dir
 }
 
 func getFilters(field_name string, c fiber.Ctx) []Filter {
