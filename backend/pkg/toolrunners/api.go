@@ -63,8 +63,16 @@ func (r *APIToolRunner) ExecuteWithContext(ctx context.Context, parameters map[s
 		timeout = time.Duration(timeoutVal) * time.Second
 	}
 
+	insecureSkipVerify := false
+	if val, ok := r.config["insecure_skip_verify"].(bool); ok {
+		insecureSkipVerify = val
+	}
+
 	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: insecureSkipVerify,
+		},
 	}
 
 	// Create HTTP client with timeout
